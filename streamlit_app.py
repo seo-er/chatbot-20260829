@@ -48,7 +48,7 @@ st.markdown(
 # ==================================================
 
 st.markdown(
-    '<div class="main-title">🚀 창업 시작 봇</div>',
+    '<div class="main-title">AI 창업 파트너</div>',
     unsafe_allow_html=True
 )
 
