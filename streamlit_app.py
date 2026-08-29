@@ -6,7 +6,7 @@ from openai import OpenAI
 # ==================================================
 
 st.set_page_config(
-    page_title="창업 시작 봇",
+    page_title="AI 창업 파트너",
     page_icon="🚀",
     layout="centered"
 )
