@@ -1,5 +1,6 @@
 import streamlit as st
 from openai import OpenAI
+import json
 
 # --------------------------------------------------
 # 페이지 설정
@@ -12,49 +13,92 @@ st.set_page_config(
 )
 
 # --------------------------------------------------
-# 제목
+# 기본 스타일
 # --------------------------------------------------
 
-st.title("✈️ AI 여행 플래너")
-st.caption("나에게 맞는 여행을 AI와 함께 계획해보세요.")
+st.markdown("""
+<style>
+
+    /* 전체 */
+    .stApp {
+        background-color: #ffffff;
+    }
+
+    /* 상단 제목 */
+    .main-title {
+        font-size: 32px;
+        font-weight: 700;
+        margin-bottom: 4px;
+    }
+
+    .main-description {
+        color: #6b7280;
+        font-size: 15px;
+        margin-bottom: 28px;
+    }
+
+    /* 빠른 질문 카드 */
+    .section-title {
+        font-size: 18px;
+        font-weight: 700;
+        margin-top: 20px;
+        margin-bottom: 12px;
+    }
+
+    /* 버튼 */
+    div.stButton > button {
+        border-radius: 10px;
+        min-height: 42px;
+        font-weight: 500;
+    }
+
+    /* 채팅 메시지 */
+    [data-testid="stChatMessage"] {
+        padding: 10px 0;
+    }
+
+    /* 입력창 */
+    [data-testid="stChatInput"] {
+        border-radius: 14px;
+    }
+
+    /* 사이드바 */
+    [data-testid="stSidebar"] {
+        border-right: 1px solid #eeeeee;
+    }
+
+</style>
+""", unsafe_allow_html=True)
+
 
 # --------------------------------------------------
-# API Key
-# --------------------------------------------------
-
-openai_api_key = st.text_input(
-    "OpenAI API Key",
-    type="password",
-    placeholder="OpenAI API Key를 입력해주세요."
-)
-
-if not openai_api_key:
-    st.info(
-        "🔑 OpenAI API Key를 입력하면 여행 플래너를 사용할 수 있습니다."
-    )
-    st.stop()
-
-# --------------------------------------------------
-# OpenAI
-# --------------------------------------------------
-
-client = OpenAI(api_key=openai_api_key)
-
-# --------------------------------------------------
-# Session State
+# 세션 상태
 # --------------------------------------------------
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+if "uploaded_file" not in st.session_state:
+    st.session_state.uploaded_file = None
+
+
 # --------------------------------------------------
-# 사이드바 - 여행 설정
+# API Key
 # --------------------------------------------------
 
 with st.sidebar:
 
-    st.header("✈️ 여행 설정")
-    st.caption("여행 정보를 입력하면 AI가 추천에 반영합니다.")
+    st.markdown("### ⚙️ 설정")
+
+    openai_api_key = st.text_input(
+        "OpenAI API Key",
+        type="password",
+        placeholder="API Key 입력"
+    )
+
+    st.divider()
+
+    st.markdown("### ✈️ 여행 설정")
 
     destination = st.text_input(
         "📍 여행지",
@@ -93,7 +137,7 @@ with st.sidebar:
     )
 
     budget = st.selectbox(
-        "💰 여행 예산",
+        "💰 예산",
         [
             "가성비",
             "보통",
@@ -104,13 +148,47 @@ with st.sidebar:
 
     st.divider()
 
-    # 새 대화 버튼
+    # 새 여행
     if st.button(
         "🗑️ 새 여행 시작",
         use_container_width=True
     ):
         st.session_state.messages = []
+        st.session_state.uploaded_file = None
         st.rerun()
+
+
+# --------------------------------------------------
+# API Key 체크
+# --------------------------------------------------
+
+if not openai_api_key:
+
+    st.markdown(
+        '<div class="main-title">✈️ AI 여행 플래너</div>',
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        '<div class="main-description">'
+        '나에게 맞는 여행을 AI와 함께 계획해보세요.'
+        '</div>',
+        unsafe_allow_html=True
+    )
+
+    st.info(
+        "🔑 왼쪽 설정에서 OpenAI API Key를 입력해주세요."
+    )
+
+    st.stop()
+
+
+# --------------------------------------------------
+# OpenAI
+# --------------------------------------------------
+
+client = OpenAI(api_key=openai_api_key)
+
 
 # --------------------------------------------------
 # AI 역할
@@ -119,44 +197,102 @@ with st.sidebar:
 system_message = f"""
 너는 전문 여행 플래너 AI야.
 
-사용자의 여행 정보를 바탕으로
-실제로 활용할 수 있는 여행 계획과 추천을 제공해.
+사용자의 여행 목적과 취향을 파악하고
+실제로 사용할 수 있는 여행 계획을 만들어줘.
 
-현재 설정된 여행 정보:
+현재 여행 설정:
 
-- 여행지: {destination if destination else "아직 정하지 않음"}
+- 여행지: {destination if destination else "미정"}
 - 여행 기간: {days}일
 - 동행: {companion}
 - 여행 스타일: {travel_style}
 - 예산: {budget}
 
-답변할 때 다음 원칙을 지켜.
+답변 원칙:
 
-1. 사용자가 입력한 여행 조건을 최대한 반영한다.
-2. 여행 일정은 이동 동선을 고려한다.
-3. 필요한 경우 일정에 관광지, 맛집, 카페 등을 적절하게 배치한다.
-4. 일정은 Day 1, Day 2처럼 구분해서 보여준다.
-5. 너무 긴 설명보다는 실제로 사용하기 쉬운 형태로 정리한다.
-6. 사용자가 정보가 부족한 경우 필요한 질문을 먼저 한다.
-7. 사용자가 특정 장소나 활동을 요청하면 그 요청을 우선한다.
-8. 답변은 친절하고 이해하기 쉽게 작성한다.
+1. 사용자의 여행 조건을 최대한 반영한다.
+2. 이동 동선을 고려해서 일정을 구성한다.
+3. Day 1, Day 2, Day 3 형식으로 정리한다.
+4. 각 일정에 장소와 추천 이유를 함께 설명한다.
+5. 맛집, 카페, 관광지를 적절하게 조합한다.
+6. 너무 긴 설명보다 실제 여행에 바로 사용할 수 있도록 정리한다.
+7. 사용자의 질문에 필요한 정보가 부족하면 먼저 질문한다.
+8. 친절하고 자연스럽게 대화한다.
 """
+
+
+# --------------------------------------------------
+# 헤더
+# --------------------------------------------------
+
+st.markdown(
+    '<div class="main-title">✈️ AI 여행 플래너</div>',
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    '<div class="main-description">'
+    '여행지와 취향을 알려주면 나에게 맞는 여행을 함께 계획해드려요.'
+    '</div>',
+    unsafe_allow_html=True
+)
+
+
+# --------------------------------------------------
+# 공유하기 기능
+# --------------------------------------------------
+
+def share_conversation():
+
+    if not st.session_state.messages:
+        st.warning("먼저 AI와 여행 계획을 만들어보세요.")
+        return
+
+    conversation_text = "✈️ AI 여행 플래너\n\n"
+
+    for message in st.session_state.messages:
+
+        if message["role"] == "user":
+            conversation_text += "🙋 나\n"
+        else:
+            conversation_text += "✈️ AI 여행 플래너\n"
+
+        conversation_text += message["content"]
+        conversation_text += "\n\n"
+
+    # HTML을 이용해서 클립보드 복사
+    escaped_text = json.dumps(conversation_text)
+
+    st.markdown(
+        f"""
+        <script>
+        navigator.clipboard.writeText({escaped_text});
+        </script>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.success("여행 계획이 클립보드에 복사됐어요!")
+
 
 # --------------------------------------------------
 # 첫 화면
 # --------------------------------------------------
 
+prompt = None
+
 if len(st.session_state.messages) == 0:
 
-    st.markdown("### 👋 어떤 여행을 계획하고 계신가요?")
-
-    st.write(
-        "왼쪽에서 여행 정보를 설정하거나 "
-        "아래의 빠른 시작 메뉴를 선택해보세요."
+    st.markdown(
+        '<div class="section-title">👋 무엇을 도와드릴까요?</div>',
+        unsafe_allow_html=True
     )
 
-    st.markdown("#### 🚀 빠른 시작")
+    st.caption(
+        "아래에서 원하는 여행 계획을 선택하거나 직접 질문해보세요."
+    )
 
+    # 빠른 질문
     col1, col2 = st.columns(2)
 
     with col1:
@@ -168,16 +304,16 @@ if len(st.session_state.messages) == 0:
             prompt = "내 여행 조건에 맞춰 전체 여행 일정을 짜줘."
 
         if st.button(
-            "🍴 맛집 여행",
+            "🍴 맛집 중심 여행",
             use_container_width=True
         ):
-            prompt = "맛집을 중심으로 여행 코스를 짜줘."
+            prompt = "맛집을 중심으로 여행 코스를 추천해줘."
 
         if st.button(
             "🌿 힐링 여행",
             use_container_width=True
         ):
-            prompt = "힐링과 휴식을 중심으로 여행 코스를 짜줘."
+            prompt = "휴식과 힐링을 중심으로 여행 코스를 추천해줘."
 
     with col2:
 
@@ -191,7 +327,7 @@ if len(st.session_state.messages) == 0:
             "💰 가성비 여행",
             use_container_width=True
         ):
-            prompt = "비용을 최대한 아끼면서 여행할 수 있는 코스를 추천해줘."
+            prompt = "비용을 아끼면서 여행할 수 있는 코스를 추천해줘."
 
         if st.button(
             "☕ 카페 여행",
@@ -199,16 +335,6 @@ if len(st.session_state.messages) == 0:
         ):
             prompt = "분위기 좋은 카페를 중심으로 여행 코스를 추천해줘."
 
-else:
-
-    prompt = None
-
-# --------------------------------------------------
-# prompt 기본값
-# --------------------------------------------------
-
-if "prompt" not in locals():
-    prompt = None
 
 # --------------------------------------------------
 # 기존 대화 표시
@@ -217,7 +343,51 @@ if "prompt" not in locals():
 for message in st.session_state.messages:
 
     with st.chat_message(message["role"]):
+
         st.markdown(message["content"])
+
+
+# --------------------------------------------------
+# 하단 버튼 영역
+# --------------------------------------------------
+
+st.divider()
+
+col1, col2 = st.columns([1, 5])
+
+with col1:
+
+    # + 버튼
+    with st.popover("＋"):
+
+        st.markdown("### 추가하기")
+
+        uploaded_file = st.file_uploader(
+            "여행 관련 파일을 추가하세요.",
+            type=[
+                "txt",
+                "pdf",
+                "png",
+                "jpg",
+                "jpeg"
+            ]
+        )
+
+        if uploaded_file:
+            st.session_state.uploaded_file = uploaded_file
+            st.success(
+                f"{uploaded_file.name} 추가됨"
+            )
+
+with col2:
+
+    # 공유 버튼
+    if st.button(
+        "↗ 공유하기",
+        use_container_width=True
+    ):
+        share_conversation()
+
 
 # --------------------------------------------------
 # 채팅 입력
@@ -230,13 +400,39 @@ chat_prompt = st.chat_input(
 if chat_prompt:
     prompt = chat_prompt
 
+
 # --------------------------------------------------
 # AI 응답
 # --------------------------------------------------
 
 if prompt:
 
+    # --------------------------------------------------
+    # 파일 정보
+    # --------------------------------------------------
+
+    file_info = ""
+
+    if st.session_state.uploaded_file:
+
+        file_info = f"""
+
+사용자가 다음 파일을 추가했습니다:
+
+파일명:
+{st.session_state.uploaded_file.name}
+
+파일 형식:
+{st.session_state.uploaded_file.type}
+
+파일이 있다는 점을 고려해서 답변해줘.
+"""
+
+
+    # --------------------------------------------------
     # 사용자 메시지 저장
+    # --------------------------------------------------
+
     st.session_state.messages.append(
         {
             "role": "user",
@@ -244,25 +440,49 @@ if prompt:
         }
     )
 
+    # --------------------------------------------------
     # 사용자 메시지 표시
+    # --------------------------------------------------
+
     with st.chat_message("user"):
+
         st.markdown(prompt)
 
-    # OpenAI 요청
+        if st.session_state.uploaded_file:
+
+            st.caption(
+                f"📎 {st.session_state.uploaded_file.name}"
+            )
+
+
+    # --------------------------------------------------
+    # AI 요청
+    # --------------------------------------------------
+
     try:
+
+        messages_for_api = [
+            {
+                "role": "system",
+                "content": system_message + file_info
+            }
+        ]
+
+        messages_for_api.extend(
+            st.session_state.messages
+        )
 
         stream = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_message
-                }
-            ] + st.session_state.messages,
+            messages=messages_for_api,
             stream=True
         )
 
+
+        # --------------------------------------------------
         # AI 답변
+        # --------------------------------------------------
+
         with st.chat_message("assistant"):
 
             response = st.write_stream(
@@ -271,7 +491,11 @@ if prompt:
                 if chunk.choices
             )
 
-        # AI 답변 저장
+
+        # --------------------------------------------------
+        # 답변 저장
+        # --------------------------------------------------
+
         st.session_state.messages.append(
             {
                 "role": "assistant",
@@ -279,15 +503,15 @@ if prompt:
             }
         )
 
-    except Exception as e:
+        # 파일 초기화
+        st.session_state.uploaded_file = None
 
-        st.error(
-            "AI 응답을 가져오는 중 문제가 발생했습니다."
-        )
+    except Exception:
 
-        # 오류가 난 사용자 메시지는 삭제
+        # 실패한 사용자 메시지 제거
         st.session_state.messages.pop()
 
-        st.caption(
-            "API Key가 올바른지 확인하거나 잠시 후 다시 시도해주세요."
+        st.error(
+            "AI 응답을 가져오지 못했어요. "
+            "API Key를 확인해주세요."
         )
